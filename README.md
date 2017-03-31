@@ -50,6 +50,66 @@ Add the following to your Gemfile:
 
 # Usage
 
+Initialize it like this:
+
+```ruby
+class ApplicationJob < ActiveJob::Base
+
+  before_perform :initialize_exception_handler
+
+  def perform(normal:, credentials: {}, spawn_job_id:, exception_handler: default_exception_handler)
+    @exception_handler = exception_handler
+    initialize_exception_handling
+
+    exception_handler.process! do
+      return if skip?
+      collector.run run_options
+      emitter.flush!
+      kapost_client.update_credentials(adapter.updated_tokens) if adapter.refreshed_tokens?
+      perform_successful
+    end
+  end
+
+  protected
+
+  def exception_handler
+    @exception_handler ||= ExceptionHandler.new(exception_context: exception_context)
+  end
+
+  def exception_context
+    ExceptionContext.new(
+      source: self.class.name,
+      queue: queue_name,
+      args: arguments
+    )
+  end
+
+  def initialize_exception_handling
+    # implement this method to define how errors are handled
+  end
+end
+```
+
+And then use it in jobs like this:
+
+```ruby
+class MyJob < ApplicationJob
+
+  def perform(...)
+    # ...
+  end
+
+  protected
+
+  def initialize_exception_handling
+    exception_handler.add HTTPServerError, :retryables # Transient HTTP error
+    exception_handler.add HTTPAuthenticationError, :unretryables # User credentials are wrong, don't retry
+    exception_handler.add HTTPNotFoundError, :ignorables # Page is gone, we don't care anymore
+  end
+
+end
+```
+
 # Tests
 
 To test, run:
@@ -85,5 +145,5 @@ Built with [Gemsmith](https://github.com/bkuhlmann/gemsmith).
 
 # Credits
 
-Developed by [Paul Sadauskas]() at
-[]().
+Developed by [Paul Sadauskas]() and [Brooke Kuhlmann]() at
+[Kapost](www.kapost.com).
